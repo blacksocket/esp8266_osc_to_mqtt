@@ -17,6 +17,8 @@ const int mqtt_host_ip[4] = {
 
 
 MQTT topic structure is:
+|topic|desc|
+|-----|----|
 |osc/rain|rain total inches, don't know the time range for the total?|
 |osc/rain_rate|rain rate in inches per hour|
 |osc/wind_speed|average speed m/s|
