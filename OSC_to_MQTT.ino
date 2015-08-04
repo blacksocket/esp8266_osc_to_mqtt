@@ -286,6 +286,8 @@ byte nyb(int nybble) {
 }
 
 void analyseData() {
+  // Note that these include the sync nybble A
+
   if (manchester[0] == 0xaf) { //detected the Thermometer and Hygrometer
     thermom();
     dumpThermom();
@@ -341,63 +343,50 @@ void dumpRain() {
   send_measurement("osc/rain_rate", rainRate);
 }
 
-// WGR800 Wind speed sensor
+// WGR800 1984 Wind speed sensor
 // Sample Data:
 // 0        1        2        3        4        5        6        7        8        9
 // A1       98       40       8E       00       0C       70       04       00       34
 // 0   1    2   3    4   5    6   7    8   9    A   B    C   D    E   F    0   1    2   3
 // 10100001 10011000 01000000 10001110 00000000 00001100 01110000 00000100 00000000 00110100
-// -------- -------- bbbb---- NRRRRRRR xxxx9999 xxxxxxxx CCCCDDDD xxxxFFFF 0000---- CCCCcccc
 // Av Speed 0.4000000000m/s Gusts 0.7000000000m/s  Direction: N
-
-// byte(0)_byte(1) = Sensor ID?????
-// bbbb = Battery indicator??? (7)  My investigations would disagree here.  After exhaustive low battery tests these bits did not change
-// NRRRRRRR = Rolling Code Byte, the N bit is set to 1 for 64 cycles to indicate it is reset or new to the Rx box
-// 9999 = Direction
-// DDDD.CCCC = Gust Speed (m per sec)
-// 0000.FFFF = Avg Speed(m per sec)
-// multiply by 3600/1000 for km/hr
-// ccccCCCC = 1 byte checksum cf. sum of nybbles
-// packet length is 20 nybbles
+//
+// **** Adjusted to match documentation found
+// **** Nybble offset adjusted for the sync nybble being in the data (A)
+// 0        1        2        3        4        5        6        7        8        9
+// 19       84       08       E0       00       C7       00       40       03       4x
+// 0   1    2   3    4   5    6   7    8   9    A   B    C   D    E   F    0   1    2   3
+// 00011001 10000100 00001000 11100000 00000000 11000111 00000000 01000000 00000011 0100xxxx
+// SSSSSSSS SSSSSSSS ccccRRRR RRRRffff 9999???? ????tttt ssssssss bbbbaaaa aaaaCCCC CCCC
+// Nybble
+// 1       S = sensor ID 0x1984
+// 5       cccc = channel number (1)
+// 6       RRRRRRRR = rolling code
+// 8       ffff = flags
+// 9       9999 = Direction
+// 10      ssssssss.tttt = current speed/gust in m/s
+// 13      aaaaaaaa.bbbb = avg speed in m/s
+// 16      CCCCCCCC = checksum
 
 void anemom() {
   //D A1 98 40 8E 08 0C 60 04 00 A4
-  avWindspeed = ((nyb(16) * 10) + nyb(15)) * 3.6 / 10;
-  gustWindspeed = ((nyb(13) * 10) + nyb(12)) * 3.6 / 10;
-  quadrant = nyb(9) & 0xF;
+  // These are in m/s
+  gustWindspeed = (double)nyb(14) * 10.0 + (double)nyb(13) + (double)nyb(12) / 10.0;
+  avWindspeed = (double)nyb(17) * 10.0 + (double)nyb(16) + (double)nyb(15) / 10.0;
+  quadrant = nyb(9) & 0x0F;
 }
-void dumpAnemom() {
-  Serial.print("Av Speed ");
-  Serial.print(avWindspeed);
-  Serial.print(" km/hr, Gusts ");
-  Serial.print(gustWindspeed);
-  Serial.print(" km/hr, Direction: ");
-  Serial.print(quadrant);
-  Serial.print(" -> ");
-  Serial.println(windDir[quadrant]);
 
+void dumpAnemom() {
   send_measurement("osc/wind_speed", avWindspeed);
   send_measurement("osc/wind_gust", gustWindspeed);
-  send_measurement("osc/wind_direction", (double)quadrant/16.0*360.0);
+  send_measurement("osc/wind_direction", (double)quadrant / 16.0 * 360.0);
 }
 
-// THGN800 Temperature and Humidity Sensor
-// 0        1        2        3        4        5        6        7        8        9          Bytes
-// 0   1    2   3    4   5    6   7    8   9    A   B    C   D    E   F    0   1    2   3      nybbles
-// 01011111 00010100 01000001 01000000 10001100 10000000 00001100 10100000 10110100 01111001   Bits
-// -------- -------- bbbbcccc RRRRRRRR 88889999 AAAABBBB SSSSDDDD EEEE---- CCCCcccc --------   Explanation
-// byte(0)_byte(1) = Sensor ID?????
-// bbbb = Battery indicator??? (7), My investigations on the anemometer would disagree here.  After exhaustive low battery tests these bits did not change
-// RRRRRRRR = Rolling code byte
-// nybble(5) is channel selector c (Switch on the sensor to allocate it a number)
-// BBBBAAAA.99998888 Temperature in BCD
-// SSSS sign for negative (- is !=0)
-// EEEEDDDD Humidity in BCD
-// ccccCCCC 1 byte checksum cf. sum of nybbles
-// Packet length is 18 nybbles and indeterminate after that
-// H 00 01 02 03 04 05 06 07 08 09    Byte Sequence
+// THGR810 F824 Temperature and Humidity Sensor
 // D AF 82 41 CB 89 42 00 48 85 55    Real example
 //    0 12 34 56 78 9A BC DE F0 12
+//   ^
+//   - sync marker
 // Temperature 24.9799995422 degC Humidity 40.0000000000 % rel
 void thermom() {
   temperature = (double)((nyb(11) * 100) + (nyb(10) * 10) + nyb(9)) / 10; //accuracy to 0.01 degree seems unlikely
@@ -406,13 +395,8 @@ void thermom() {
   }
   humidity = (nyb(14) * 10) + nyb(13);
 }
-void dumpThermom() {
-  Serial.print("Temperature ");
-  Serial.print(temperature);
-  Serial.print(" degC, Humidity ");
-  Serial.print(humidity);
-  Serial.println("% Rel");
 
+void dumpThermom() {
   send_measurement("osc/temperature", temperature);
   send_measurement("osc/humidity", humidity);
 }
